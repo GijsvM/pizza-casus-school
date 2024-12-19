@@ -1,38 +1,48 @@
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <DHT.h>
+#include "JSONparse.h"
+#include "HTTPClientHelper.h"
 
-// Pin Definitions
 #define relayPin 26
 #define encoderPin1 18
 #define encoderPin2 19
 #define encoderPushPin 5
+#define tempPin 25
+#define DHTTYPE DHT11 
 
-// OLED Display Settings
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
-#define OLED_RESET -1  // Reset pin (not used)
-#define SCREEN_ADDRESS 0x3C  // I2C address for the OLED display
+#define OLED_RESET -1 
+#define SCREEN_ADDRESS 0x3C 
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+DHT dht(tempPin, DHTTYPE);
+JSONparse jsonCode;
+HTTPClientHelper HTTP;
 
-// Variables for Rotary Encoder
+const char* ssid = "NETLAB-OIL460";
+const char* password = "Startsemester";
+
+#define serverURL "http://192.168.155.31:8080/oven"
+
 int encoderPos = 0;
 int encoderPin1Last = LOW;
 int n = LOW;
 int buttonState = HIGH;
 int lastButtonState = HIGH;
 
-// Oven State Variables
-int temperature = 170;       // Initial temperature (Celsius)
-int timeMinutes = 0;         // Time in minutes
-int timeSeconds = 0;         // Time in seconds
-int totalTimeSeconds = 0;    // Total time in seconds for countdown
-unsigned long lastUpdateMillis = 0; // Tracks the last time the countdown was updated
-bool isCountingDown = false; // Countdown flag
-bool isWarmup = false;       // Warmup flag
-int mode = 0;                // 0: Set Temperature, 1: Set Time, 2: Warmup, 3: Countdown
-const int warmupTimeSeconds = 120; // Warmup duration (2 minutes)
+
+int temperature = 170;       
+int timeMinutes = 0;         
+int timeSeconds = 0;        
+int totalTimeSeconds = 0;    
+unsigned long lastUpdateMillis = 0; 
+bool isCountingDown = false; 
+bool isWarmup = false;      
+int mode = 0;                
+const int warmupTimeSeconds = 120;
 int warmupRemainingSeconds = warmupTimeSeconds;
 
 void setup() {
@@ -42,6 +52,15 @@ void setup() {
   pinMode(encoderPushPin, INPUT_PULLUP);
 
   Serial.begin(115200);
+  
+  WiFi.config(IPAddress(192, 168, 68, 211), IPAddress(192, 168, 68, 1), IPAddress(255, 255, 255, 0));
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Connecting to WiFi...");
+    delay(1000);
+  }
+  Serial.println("Connected to WiFi");
 
   if (!display.begin(SSD1306_PAGEADDR, SCREEN_ADDRESS)) {
     Serial.println(F("SSD1306 allocation failed"));
@@ -58,10 +77,12 @@ void setup() {
   display.display();
   delay(1000);
   display.clearDisplay();
+  dht.begin();
 }
 
 void loop() {
-  // Read the rotary encoder
+  float temp = dht.readTemperature();
+
   n = digitalRead(encoderPin1);
   if ((encoderPin1Last == LOW) && (n == HIGH)) {
     if (digitalRead(encoderPin2) == LOW) {
@@ -70,76 +91,76 @@ void loop() {
       encoderPos++;
     }
 
-    if (mode == 0) { // Setting temperature
+    if (mode == 0) { 
       temperature = constrain(temperature + (encoderPos * 10), 170, 300);
-    } else if (mode == 1) { // Setting time in minutes
-      timeMinutes = max(0, timeMinutes + encoderPos); // Adjust minutes only
+    } else if (mode == 1) {
+      timeMinutes = max(0, timeMinutes + encoderPos);
     }
 
     encoderPos = 0;
   }
   encoderPin1Last = n;
 
-  // Handle button press
+
   buttonState = digitalRead(encoderPushPin);
   if (buttonState == LOW && lastButtonState == HIGH) {
     if (mode == 0) {
-      mode = 1; // Switch to setting time
+      mode = 1;
     } else if (mode == 1) {
-      mode = 2; // Start warmup
-      warmupRemainingSeconds = warmupTimeSeconds; // Reset warmup timer
+      mode = 2;
+      warmupRemainingSeconds = warmupTimeSeconds;
       lastUpdateMillis = millis();
       isWarmup = true;
-      digitalWrite(relayPin, HIGH); // Turn on relay for warmup
+      Serial.println(HTTP.POST(serverURL, "{\"status\": 1, \"minutesRemaining\": " + String(timeMinutes) + " , \"secondsRemaining\": " + String(timeSeconds) + ", \"setTemp\": " + String(temperature) + ", \"realTemp\": " + String(temp) + "}"));
+      digitalWrite(relayPin, HIGH);
     }
   }
   lastButtonState = buttonState;
 
-  // Warmup logic
+
   if (isWarmup) {
     unsigned long currentMillis = millis();
 
-    // Check if 1 second has elapsed
     if (currentMillis - lastUpdateMillis >= 1000) {
-      lastUpdateMillis = currentMillis; // Reset last update time
-      warmupRemainingSeconds--;        // Decrement warmup time
+      lastUpdateMillis = currentMillis; 
+      warmupRemainingSeconds--;
+      Serial.println(HTTP.POST(serverURL, "{\"status\": 1, \"minutesRemaining\": " + String(timeMinutes) + " , \"secondsRemaining\": " + String(timeSeconds) + ", \"setTemp\": " + String(temperature) + ", \"realTemp\": " + String(temp) + "}"));
+
 
       if (warmupRemainingSeconds <= 0) {
-        // Warmup finished
+  
         isWarmup = false;
-        mode = 3; // Switch to countdown mode
-        totalTimeSeconds = timeMinutes * 60; // Convert minutes to seconds
-        lastUpdateMillis = millis(); // Reset timer for countdown
-        isCountingDown = true; // Start countdown
+        mode = 3; 
+        totalTimeSeconds = timeMinutes * 60;
+        lastUpdateMillis = millis();
+        isCountingDown = true; 
       }
     }
   }
 
-  // Countdown logic
   if (isCountingDown) {
     unsigned long currentMillis = millis();
 
-    // Check if 1 second has elapsed
     if (currentMillis - lastUpdateMillis >= 1000) {
-      lastUpdateMillis = currentMillis; // Reset last update time
-      totalTimeSeconds--;              // Decrement total time
+      lastUpdateMillis = currentMillis; 
+      totalTimeSeconds--; 
+      Serial.println(HTTP.POST(serverURL, "{\"status\": 1, \"minutesRemaining\": " + String(timeMinutes) + " , \"secondsRemaining\": " + String(timeSeconds) + ", \"setTemp\": " + String(temperature) + ", \"realTemp\": " + String(temp) + "}"));
+            
 
       if (totalTimeSeconds <= 0) {
-        // Countdown finished
         isCountingDown = false;
-        mode = 0; // Reset to temperature mode
-        digitalWrite(relayPin, LOW); // Turn off relay
+        mode = 0; 
+        digitalWrite(relayPin, LOW); 
         timeMinutes = 0;
         timeSeconds = 0;
       } else {
-        // Update remaining time
-        timeMinutes = totalTimeSeconds / 60; // Calculate remaining minutes
-        timeSeconds = totalTimeSeconds % 60; // Calculate remaining seconds
+    
+        timeMinutes = totalTimeSeconds / 60; 
+        timeSeconds = totalTimeSeconds % 60;
       }
     }
   }
 
-  // Update OLED display
   display.clearDisplay();
   if (mode == 0) {
     display.setCursor(0, 0);
