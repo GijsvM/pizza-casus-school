@@ -81,9 +81,8 @@ void setup() {
 }
 
 void loop() {
-
   float temp = dht.readTemperature();
-  //leest de encoder waardes af en update de encoder positie
+
   n = digitalRead(encoderPin1);
   if ((encoderPin1Last == LOW) && (n == HIGH)) {
     if (digitalRead(encoderPin2) == LOW) {
@@ -102,7 +101,7 @@ void loop() {
   }
   encoderPin1Last = n;
 
-//leest de knop van de encoder en switched tussen de modussen
+
   buttonState = digitalRead(encoderPushPin);
   if (buttonState == LOW && lastButtonState == HIGH) {
     if (mode == 0) {
@@ -118,7 +117,7 @@ void loop() {
   }
   lastButtonState = buttonState;
 
-//start het opwarmen van de oven, dit duurt 2 minuten
+
   if (isWarmup) {
     unsigned long currentMillis = millis();
 
@@ -139,7 +138,6 @@ void loop() {
     }
   }
 
-//nu start de oven met de timer
   if (isCountingDown) {
     unsigned long currentMillis = millis();
 
@@ -147,6 +145,7 @@ void loop() {
       lastUpdateMillis = currentMillis; 
       totalTimeSeconds--; 
       Serial.println(HTTP.POST(serverURL, "{\"status\": 1, \"minutesRemaining\": " + String(timeMinutes) + " , \"secondsRemaining\": " + String(timeSeconds) + ", \"setTemp\": " + String(temperature) + ", \"realTemp\": " + String(temp) + "}"));
+            
 
       if (totalTimeSeconds <= 0) {
         isCountingDown = false;
@@ -162,7 +161,6 @@ void loop() {
     }
   }
 
-// put the temp and time on the display
   display.clearDisplay();
   if (mode == 0) {
     display.setCursor(0, 0);
